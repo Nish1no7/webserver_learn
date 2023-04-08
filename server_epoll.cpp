@@ -72,6 +72,11 @@ int main(int argc, char* argv[]) {
                 struct sockaddr_in client;
                 socklen_t client_addrlength = sizeof( client );
                 int sockfd = accept(listenfd, (struct sockaddr*) &client, &client_addrlength);
+                if(sockfd != -1) {
+                    char remote[INET_ADDRSTRLEN];
+                    printf("connected with ip: %s and port: %d\n", inet_ntop(AF_INET, &client.sin_addr, remote, INET_ADDRSTRLEN),
+                            ntohs(client.sin_port));
+                }
                 addfd(epollfd, sockfd);
             }
             else if(event.events & EPOLLIN) {
