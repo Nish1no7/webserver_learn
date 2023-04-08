@@ -29,6 +29,7 @@ void addfd(int epollfd, int fd, bool enable_et) {
     }
     event.data.fd = fd;
     epoll_ctl( epollfd, EPOLL_CTL_ADD, fd, &event);
+    // 设置文件描述符为非阻塞
     set_non_blocking( fd );
 }
 
@@ -152,7 +153,8 @@ int main(int argc, char* argv[]) {
             break;
         }
         //lt(events, ret, epollfd, listenfd);
-        et(events, ret, epollfd, listenfd);
+        et(events, ret, epollfd, listenfd); // 每个使用ET模式的文件描述符都应该是非阻塞的。如果是阻塞的，ET模式在处理事件时一直读/写势必会在最后一次阻塞
+        
     }
 
     close(listenfd);
