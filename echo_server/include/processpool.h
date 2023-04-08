@@ -72,18 +72,23 @@ processpool<T>::processpool( int listenfd, int _max_processes_num ):
 	
 	for( int i = 0; i < max_processes_num; ++i )
 	{
+        // 创建双向管道用于本地进程间通信
 		socketpair( PF_UNIX, SOCK_STREAM, 0, sub_processes[i].pipe );
+
+        // fork copy父进程 产生子进程 父进程返回子进程的pid，子进程返回0
 		sub_processes[i].pid = fork();
 		
-		if( sub_processes[i].pid > 0 )	// 父进程 关闭子进程方的pipe
+		if( sub_processes[i].pid > 0 )	// 父进程 写的进程关闭读描述符，往pipe[0]里写
 		{
+            printf("fork sucessed! subprocess_pid: %d \n", sub_processes[i].pid);
 			close( sub_processes[i].pipe[1] );
 			continue;
 		}
-		else
+		else       // 子进程 读的进程关闭写描述符，在pipe[1]里读
 		{
+            //printf("this is sub_process: %d \n", sub_processes[i].pid);
 			close( sub_processes[i].pipe[0] );
-			idx = i;
+			idx = i;  // 设置子进程序号
 			break;
 		}
 	}
@@ -116,11 +121,11 @@ static void removefd( int epollfd, int fd )
 template < typename T >
 void processpool< T > :: run()
 {
-    if( idx == -1 )
+    if( idx == -1 ) // 父进程
 	{
 	    run_parent();
 	}
-	else
+	else   // 子进程
 	{
 	    run_child();
 	}
@@ -151,16 +156,15 @@ void processpool< T > :: run_parent()
 		for( int i = 0; i < number; ++i )
 		{
 			int sockfd = events[i].data.fd;
+            // 处理监听socket的连接请求
 			if( sockfd == listenfd ) 
 			{
+                // 取下一个子进程的位置，准备把信息发给子进程
 				int pos = pre_idx;
-				do
-				{
-					pos = ( pos + 1 ) % max_processes_num;
-				}
-				while( sub_processes[pos].pid == -1 );
+				pos = ( pos + 1 ) % max_processes_num;
 				pre_idx = pos;
 
+                // 向下个子进程发送信息，通知子进程有新的socket连接
 				send( sub_processes[pos].pipe[0], ( void* )&has_new_cli, 
 						  sizeof( has_new_cli ), 0 );
 				printf( "parent processes has sent msg to %d child\n", pos );
@@ -178,8 +182,12 @@ void processpool< T > :: run_child()
 	epoll_event events[ MAX_EVENTS_NUMBER ];
 	setup_up_sig();
 
+    // 子进程在pipe[1]里读
 	int pipefd = sub_processes[idx].pipe[1];
+
+    // 把与父进程进行通信（读）的fd注册到内核事件表中
 	addfd( epollfd, pipefd );
+    
 	T* users = new T [MAX_USER_PER_PROCESS];
 
 	int number = 0;
@@ -189,17 +197,21 @@ void processpool< T > :: run_child()
 		for( int i = 0; i < number; ++i )
 		{
 			int sockfd = events[i].data.fd;
+            // 如果是父子进程通信的pipefd，说明父进程发来了消息，子进程需要在accept队列中取一条socket
 			if( sockfd == pipefd && ( events[i].events & EPOLLIN ) )
 			{
 				struct sockaddr_in client;
                 socklen_t client_addrlength = sizeof( client );
                 int connfd = accept( listenfd, ( struct sockaddr* )( &client ),
                                      &client_addrlength );
+                // 将连接socket注册到内核事件表中
 				addfd( epollfd, connfd );
+                // 初始化该connfd的信息
 				users[connfd].init( epollfd, connfd, client );
 				printf( "child %d is addfding \n", idx );
 				continue;
 			}
+            // 如果是子进程已经注册过的连接socket发来信息，处理信息
 			else if( events[i].events & EPOLLIN )
 			{
 				printf( "child %d has recv msg\n", idx );
